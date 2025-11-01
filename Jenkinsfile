@@ -24,8 +24,8 @@ pipeline {
         stage('Setup Python Dependencies and Test Backend') {
             steps {
                 dir('backend') {
-                    sh 'pip3 install -r requirements.txt'
-                    sh 'python3 -m unittest discover tests'
+                    sh "pip3 install -r requirements.txt"
+                    sh "python3 -m unittest discover tests"
                 }
             }
         }
@@ -33,8 +33,8 @@ pipeline {
         stage('Build Frontend') {
             steps {
                 dir('frontend') {
-                    sh 'npm install'
-                    sh 'npm run build'
+                    sh "npm install"
+                    sh "npm run build"
                 }
             }
         }
@@ -42,8 +42,8 @@ pipeline {
         stage('Build Docker Images') {
             steps {
                 script {
-                    def backendImage = "${env.ECR_REPO_BACKEND}:latest"
-                    def frontendImage = "${env.ECR_REPO_FRONTEND}:latest"
+                    def backendImage = "${ECR_REPO_BACKEND}:latest"
+                    def frontendImage = "${ECR_REPO_FRONTEND}:latest"
 
                     dir('backend') {
                         sh """
@@ -101,13 +101,13 @@ pipeline {
     post {
         success {
             mail to: 'joemarian3010@gmail.com',
-                 subject: "✅ Jenkins Build Success: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                 body: "Good news! The build was successful.\n\nCheck details at ${env.BUILD_URL}"
+                subject: "✅ Jenkins Build Success: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: "Good news! The build was successful.\n\nCheck details at ${env.BUILD_URL}"
         }
         failure {
             mail to: 'joemarian3010@gmail.com',
-                 subject: "❌ Jenkins Build FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                 body: "Warning! The build failed.\n\nDetails: ${env.BUILD_URL}"
+                subject: "❌ Jenkins Build FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: "Warning! The build failed.\n\nDetails: ${env.BUILD_URL}"
         }
     }
 }
