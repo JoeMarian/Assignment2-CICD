@@ -7,7 +7,7 @@ pipeline {
         ECR_REPO_FRONTEND = 'your-frontend-ecr-repo-name'
         EC2_USER = 'ubuntu'
         EC2_HOST = '<your-ec2-elastic-ip>'
-        SSH_KEY = credentials('your-ssh-key-credentials-id')
+        SSH_KEY = credentials('ec2-ssh-key')
     }
 
     stages {
