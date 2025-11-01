@@ -47,13 +47,14 @@ pipeline {
 
                     dir('backend') {
                         sh '''
-                        docker buildx create --use || true
-                        docker buildx build --platform linux/amd64,linux/arm64 -t ${backendImage} --push .
+                            docker buildx create --use || true
+                            docker buildx build --platform linux/amd64,linux/arm64 -t ${backendImage} --push .
                         '''
                     }
+
                     dir('frontend') {
                         sh '''
-                        docker buildx build --platform linux/amd64,linux/arm64 -t ${frontendImage} --push .
+                            docker buildx build --platform linux/amd64,linux/arm64 -t ${frontendImage} --push .
                         '''
                     }
                 }
@@ -64,14 +65,11 @@ pipeline {
             steps {
                 script {
                     sh '''
-                    aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/*}
+                        aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/*}
+                        docker push ${ECR_REPO_BACKEND}:latest
+                        aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_REPO_FRONTEND%/*}
+                        docker push ${ECR_REPO_FRONTEND}:latest
                     '''
-                    sh "docker push ${ECR_REPO_BACKEND}:latest"
-
-                    sh '''
-                    aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_REPO_FRONTEND%/*}
-                    '''
-                    sh "docker push ${ECR_REPO_FRONTEND}:latest"
                 }
             }
         }
@@ -79,21 +77,21 @@ pipeline {
         stage('Deploy to EC2') {
             steps {
                 sshagent(credentials: ['ec2-ssh-key']) {
-                    sh """
-                    ssh -o StrictHostKeyChecking=no -i ${SSH_KEY} ${EC2_USER}@${EC2_HOST} <<EOF
-                    aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/*}
-                    docker pull ${ECR_REPO_BACKEND}:latest
-                    docker stop backend || true
-                    docker rm backend || true
-                    docker run -d --name backend -p 5000:5000 ${ECR_REPO_BACKEND}:latest
+                    sh '''
+                        ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} '
+                            aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/*}
+                            docker pull ${ECR_REPO_BACKEND}:latest
+                            docker stop backend || true
+                            docker rm backend || true
+                            docker run -d --name backend -p 5000:5000 ${ECR_REPO_BACKEND}:latest
 
-                    aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_REPO_FRONTEND%/*}
-                    docker pull ${ECR_REPO_FRONTEND}:latest
-                    docker stop frontend || true
-                    docker rm frontend || true
-                    docker run -d --name frontend -p 3000:3000 ${ECR_REPO_FRONTEND}:latest
-                    EOF
-                    """
+                            aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_REPO_FRONTEND%/*}
+                            docker pull ${ECR_REPO_FRONTEND}:latest
+                            docker stop frontend || true
+                            docker rm frontend || true
+                            docker run -d --name frontend -p 3000:3000 ${ECR_REPO_FRONTEND}:latest
+                        '
+                    '''
                 }
             }
         }
@@ -103,7 +101,7 @@ pipeline {
         success {
             mail to: 'joemarian3010@gmail.com',
                  subject: "Jenkins Build Success: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                 body: "Good news! The build was successful.\n\nCheck the build details at ${env.BUILD_URL}"
+                 body: "Good news! The build was successful.\n\nCheck details at ${env.BUILD_URL}"
         }
         failure {
             mail to: 'joemarian3010@gmail.com',
