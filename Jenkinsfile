@@ -7,11 +7,11 @@ pipeline {
 
     environment {
         AWS_REGION = 'ap-south-1'
-        ECR_REPO_BACKEND = 'your-backend-ecr-repo-name'
-        ECR_REPO_FRONTEND = 'your-frontend-ecr-repo-name'
+        ECR_REPO_BACKEND = '590184146868.dkr.ecr.ap-south-1.amazonaws.com/backend-app'
+        ECR_REPO_FRONTEND = '590184146868.dkr.ecr.ap-south-1.amazonaws.com/frontend-app'
         EC2_USER = 'ubuntu'
-        EC2_HOST = '<your-ec2-elastic-ip>'
-        SSH_KEY = credentials('your-ssh-key-credential-id')
+        EC2_HOST = '13.202.69.157'
+        SSH_KEY = credentials('ec2-ssh-key')
     }
 
     stages {
@@ -94,12 +94,12 @@ pipeline {
 
     post {
         success {
-            mail to: 'your-email@domain.com',
+            mail to: 'joemarian3010@gmail.com',
                  subject: "Jenkins Build Success: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                  body: "Good news! The build was successful.\n\nCheck the build details at ${env.BUILD_URL}"
         }
         failure {
-            mail to: 'your-email@domain.com',
+            mail to: 'joemarian3010@gmail.com',
                  subject: "Jenkins Build FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                  body: "Warning! The build failed.\n\nDetails: ${env.BUILD_URL}"
         }
