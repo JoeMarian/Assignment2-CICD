@@ -30,46 +30,34 @@ pipeline {
             }
         }
 
-    stage('Build Frontend') {
-    steps {
-        dir('frontend') {
-            sh 'pwd'
-            sh 'ls -l'
-            sh 'npm install'
-            sh 'npm run build'
-        }
-    }
-}
-
-
-        stage('Build Docker Images') {
+        stage('Build Frontend') {
             steps {
-                script {
-                    def backendImage = "${env.ECR_REPO_BACKEND}:latest"
-                    def frontendImage = "${env.ECR_REPO_FRONTEND}:latest"
-
-                    dir('backend') {
-                        sh "docker build -t ${backendImage} ."
-                    }
-                    dir('frontend') {
-                        sh "docker build -t ${frontendImage} ."
-                    }
+                dir('frontend') {
+                    sh 'npm install'
+                    sh 'npm run build'
                 }
             }
         }
 
-        stage('Push Images to ECR') {
+        stage('Build and Push Docker Images (Multi-Arch)') {
             steps {
                 script {
-                    sh '''
-                    aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/*}
-                    '''
-                    sh "docker push ${ECR_REPO_BACKEND}:latest"
+                    def backendImage = "${ECR_REPO_BACKEND}:latest"
+                    def frontendImage = "${ECR_REPO_FRONTEND}:latest"
 
                     sh '''
-                    aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_REPO_FRONTEND%/*}
+                    # Setup Docker Buildx
+                    docker buildx create --use || true
+                    aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/*}
+
+                    # Build and Push Backend for both ARM and AMD architectures
+                    cd backend
+                    docker buildx build --platform linux/amd64,linux/arm64 -t $ECR_REPO_BACKEND:latest --push .
+
+                    # Build and Push Frontend
+                    cd ../frontend
+                    docker buildx build --platform linux/amd64,linux/arm64 -t $ECR_REPO_FRONTEND:latest --push .
                     '''
-                    sh "docker push ${ECR_REPO_FRONTEND}:latest"
                 }
             }
         }
@@ -77,19 +65,25 @@ pipeline {
         stage('Deploy to EC2') {
             steps {
                 script {
-                    sh """
-                    ssh -o StrictHostKeyChecking=no -i ${SSH_KEY} ${EC2_USER}@${EC2_HOST} << EOF
-                    docker pull ${ECR_REPO_BACKEND}:latest
-                    docker stop backend || true
-                    docker rm backend || true
-                    docker run -d --name backend -p 5000:5000 ${ECR_REPO_BACKEND}:latest
+                    // Save SSH key securely and use input redirection to avoid interpolation warning
+                    writeFile file: 'ec2_key.pem', text: SSH_KEY
+                    sh 'chmod 600 ec2_key.pem'
 
-                    docker pull ${ECR_REPO_FRONTEND}:latest
-                    docker stop frontend || true
-                    docker rm frontend || true
-                    docker run -d --name frontend -p 3000:3000 ${ECR_REPO_FRONTEND}:latest
-                    EOF
-                    """
+                    sh '''
+                    ssh -o StrictHostKeyChecking=no -i ec2_key.pem ${EC2_USER}@${EC2_HOST} '
+                        docker login --username AWS -p $(aws ecr get-login-password --region ${AWS_REGION}) ${ECR_REPO_BACKEND%/*}
+                        
+                        docker pull ${ECR_REPO_BACKEND}:latest
+                        docker stop backend || true
+                        docker rm backend || true
+                        docker run -d --name backend -p 5000:5000 ${ECR_REPO_BACKEND}:latest
+
+                        docker pull ${ECR_REPO_FRONTEND}:latest
+                        docker stop frontend || true
+                        docker rm frontend || true
+                        docker run -d --name frontend -p 3000:3000 ${ECR_REPO_FRONTEND}:latest
+                    '
+                    '''
                 }
             }
         }
@@ -98,13 +92,13 @@ pipeline {
     post {
         success {
             mail to: 'joemarian3010@gmail.com',
-                 subject: "Jenkins Build Success: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                 body: "Good news! The build was successful.\n\nCheck the build details at ${env.BUILD_URL}"
+                subject: "✅ Jenkins Build Success: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: "Build succeeded!\n\nView details: ${env.BUILD_URL}"
         }
         failure {
             mail to: 'joemarian3010@gmail.com',
-                 subject: "Jenkins Build FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                 body: "Warning! The build failed.\n\nDetails: ${env.BUILD_URL}"
+                subject: "❌ Jenkins Build Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: "Build failed.\n\nCheck details: ${env.BUILD_URL}"
         }
     }
 }
