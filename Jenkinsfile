@@ -30,17 +30,14 @@ pipeline {
             }
         }
 
-    stage('Build Frontend') {
-    steps {
-        dir('frontend') {
-            sh 'pwd'
-            sh 'ls -l'
-            sh 'npm install'
-            sh 'npm run build'
+        stage('Build Frontend') {
+            steps {
+                dir('frontend') {
+                    sh 'npm install'
+                    sh 'npm run build'
+                }
+            }
         }
-    }
-}
-
 
         stage('Build Docker Images') {
             steps {
@@ -49,10 +46,15 @@ pipeline {
                     def frontendImage = "${env.ECR_REPO_FRONTEND}:latest"
 
                     dir('backend') {
-                        sh "docker build -t ${backendImage} ."
+                        sh '''
+                        docker buildx create --use || true
+                        docker buildx build --platform linux/amd64,linux/arm64 -t ${backendImage} --push .
+                        '''
                     }
                     dir('frontend') {
-                        sh "docker build -t ${frontendImage} ."
+                        sh '''
+                        docker buildx build --platform linux/amd64,linux/arm64 -t ${frontendImage} --push .
+                        '''
                     }
                 }
             }
@@ -76,14 +78,16 @@ pipeline {
 
         stage('Deploy to EC2') {
             steps {
-                script {
+                sshagent(credentials: ['ec2-ssh-key']) {
                     sh """
-                    ssh -o StrictHostKeyChecking=no -i ${SSH_KEY} ${EC2_USER}@${EC2_HOST} << EOF
+                    ssh -o StrictHostKeyChecking=no -i ${SSH_KEY} ${EC2_USER}@${EC2_HOST} <<EOF
+                    aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/*}
                     docker pull ${ECR_REPO_BACKEND}:latest
                     docker stop backend || true
                     docker rm backend || true
                     docker run -d --name backend -p 5000:5000 ${ECR_REPO_BACKEND}:latest
 
+                    aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_REPO_FRONTEND%/*}
                     docker pull ${ECR_REPO_FRONTEND}:latest
                     docker stop frontend || true
                     docker rm frontend || true
