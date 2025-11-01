@@ -65,8 +65,7 @@ pipeline {
                 script {
                     echo "Pushing Docker images to ECR..."
                     sh """
-                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/*}
-
+                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/ *}
                         docker push ${ECR_REPO_BACKEND}:latest
                         docker push ${ECR_REPO_FRONTEND}:latest
                     """
@@ -82,25 +81,25 @@ pipeline {
                     script {
                         echo "Deploying to EC2 at ${EC2_HOST}..."
                         sh """
-                        ssh -o StrictHostKeyChecking=no -i $SSH_KEY $SSH_USER@${EC2_HOST} << 'EOF'
-                        set -e
-                        echo "🔐 Logging in to AWS ECR..."
-                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/*}
+                            ssh -o StrictHostKeyChecking=no -i $SSH_KEY $SSH_USER@${EC2_HOST} << 'EOF'
+                            set -e
+                            echo "🔐 Logging in to AWS ECR..."
+                            aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/*}
 
-                        echo "⬇️ Pulling backend image..."
-                        docker pull ${ECR_REPO_BACKEND}:latest
-                        docker stop backend || true
-                        docker rm backend || true
-                        docker run -d --name backend -p 5000:5000 ${ECR_REPO_BACKEND}:latest
+                            echo "⬇️ Pulling backend image..."
+                            docker pull ${ECR_REPO_BACKEND}:latest
+                            docker stop backend || true
+                            docker rm backend || true
+                            docker run -d --name backend -p 5000:5000 ${ECR_REPO_BACKEND}:latest
 
-                        echo "⬇️ Pulling frontend image..."
-                        docker pull ${ECR_REPO_FRONTEND}:latest
-                        docker stop frontend || true
-                        docker rm frontend || true
-                        docker run -d --name frontend -p 3000:3000 ${ECR_REPO_FRONTEND}:latest
+                            echo "⬇️ Pulling frontend image..."
+                            docker pull ${ECR_REPO_FRONTEND}:latest
+                            docker stop frontend || true
+                            docker rm frontend || true
+                            docker run -d --name frontend -p 3000:3000 ${ECR_REPO_FRONTEND}:latest
 
-                        echo "✅ Deployment completed successfully!"
-                        EOF
+                            echo "✅ Deployment completed successfully!"
+                            EOF
                         """
                     }
                 }
