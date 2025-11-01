@@ -1,15 +1,17 @@
 pipeline {
     agent any
+
     tools {
         maven 'Maven3'
     }
+
     environment {
         AWS_REGION = 'ap-south-1'
         ECR_REPO_BACKEND = 'your-backend-ecr-repo-name'
         ECR_REPO_FRONTEND = 'your-frontend-ecr-repo-name'
         EC2_USER = 'ubuntu'
         EC2_HOST = '<your-ec2-elastic-ip>'
-        SSH_KEY = credentials('ec2-ssh-key')
+        SSH_KEY = credentials('your-ssh-key-credential-id')
     }
 
     stages {
@@ -19,10 +21,11 @@ pipeline {
             }
         }
 
-        stage('Build Backend') {
+        stage('Setup Python Dependencies and Test Backend') {
             steps {
                 dir('backend') {
-                    sh 'mvn clean test package'
+                    sh 'pip3 install -r requirements.txt'
+                    sh 'python3 -m unittest discover tests'
                 }
             }
         }
