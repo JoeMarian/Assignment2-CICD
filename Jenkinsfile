@@ -23,8 +23,13 @@ pipeline {
         stage('Setup Python Dependencies and Test Backend') {
             steps {
                 dir('backend') {
-                    sh 'pip3 install -r requirements.txt'
-                    sh 'python3 -m unittest discover tests'
+                    sh '''
+                        python3 -m venv venv
+                        . venv/bin/activate
+                        pip install --upgrade pip
+                        pip install -r requirements.txt
+                        python3 -m unittest discover tests
+                    '''
                 }
             }
         }
@@ -32,8 +37,10 @@ pipeline {
         stage('Build Frontend') {
             steps {
                 dir('frontend') {
-                    sh 'npm install'
-                    sh 'npm run build'
+                    sh '''
+                        npm install
+                        npm run build
+                    '''
                 }
             }
         }
@@ -44,12 +51,11 @@ pipeline {
                     def backendImage = "${env.ECR_REPO_BACKEND}:latest"
                     def frontendImage = "${env.ECR_REPO_FRONTEND}:latest"
 
-                    dir('backend') {
-                        sh "docker build -t ${backendImage} ."
-                    }
-                    dir('frontend') {
-                        sh "docker build -t ${frontendImage} ."
-                    }
+                    echo "Building Docker images..."
+                    sh """
+                        docker build -t ${backendImage} ./backend
+                        docker build -t ${frontendImage} ./frontend
+                    """
                 }
             }
         }
@@ -57,35 +63,46 @@ pipeline {
         stage('Push Images to ECR') {
             steps {
                 script {
-                    sh '''
-                        aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/*}
-                        docker push ${ECR_REPO_BACKEND}:latest
+                    echo "Pushing Docker images to ECR..."
+                    sh """
+                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/*}
 
-                        aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_REPO_FRONTEND%/*}
+                        docker push ${ECR_REPO_BACKEND}:latest
                         docker push ${ECR_REPO_FRONTEND}:latest
-                    '''
+                    """
                 }
             }
         }
 
         stage('Deploy to EC2') {
             steps {
-                sshagent(['ec2-ssh-key']) {
-                    sh '''
-                        ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} '
-                            aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/*}
+                withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh-key',
+                                                   keyFileVariable: 'SSH_KEY',
+                                                   usernameVariable: 'SSH_USER')]) {
+                    script {
+                        echo "Deploying to EC2 at ${EC2_HOST}..."
+                        sh """
+                        ssh -o StrictHostKeyChecking=no -i $SSH_KEY $SSH_USER@${EC2_HOST} << 'EOF'
+                        set -e
+                        echo "🔐 Logging in to AWS ECR..."
+                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/*}
 
-                            docker pull ${ECR_REPO_BACKEND}:latest
-                            docker stop backend || true
-                            docker rm backend || true
-                            docker run -d --name backend -p 5000:5000 ${ECR_REPO_BACKEND}:latest
+                        echo "⬇️ Pulling backend image..."
+                        docker pull ${ECR_REPO_BACKEND}:latest
+                        docker stop backend || true
+                        docker rm backend || true
+                        docker run -d --name backend -p 5000:5000 ${ECR_REPO_BACKEND}:latest
 
-                            docker pull ${ECR_REPO_FRONTEND}:latest
-                            docker stop frontend || true
-                            docker rm frontend || true
-                            docker run -d --name frontend -p 3000:3000 ${ECR_REPO_FRONTEND}:latest
-                        '
-                    '''
+                        echo "⬇️ Pulling frontend image..."
+                        docker pull ${ECR_REPO_FRONTEND}:latest
+                        docker stop frontend || true
+                        docker rm frontend || true
+                        docker run -d --name frontend -p 3000:3000 ${ECR_REPO_FRONTEND}:latest
+
+                        echo "✅ Deployment completed successfully!"
+                        EOF
+                        """
+                    }
                 }
             }
         }
@@ -94,13 +111,32 @@ pipeline {
     post {
         success {
             mail to: 'joemarian3010@gmail.com',
-                 subject: "Jenkins Build Success: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                 body: "Good news! The build was successful.\n\nCheck the details at ${env.BUILD_URL}"
+                 subject: "✅ Jenkins Build Success: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                 body: """Good news! The build was successful.
+
+Project: ${env.JOB_NAME}
+Build Number: ${env.BUILD_NUMBER}
+Details: ${env.BUILD_URL}
+
+Backend: ${env.ECR_REPO_BACKEND}
+Frontend: ${env.ECR_REPO_FRONTEND}
+
+-- Jenkins CI/CD Bot
+"""
         }
+
         failure {
             mail to: 'joemarian3010@gmail.com',
-                 subject: "Jenkins Build FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                 body: "Warning! The build failed.\n\nDetails: ${env.BUILD_URL}"
+                 subject: "❌ Jenkins Build FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                 body: """Warning! The build failed.
+
+Project: ${env.JOB_NAME}
+Build Number: ${env.BUILD_NUMBER}
+Check console output for details:
+${env.BUILD_URL}
+
+-- Jenkins CI/CD Bot
+"""
         }
     }
 }
