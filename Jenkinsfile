@@ -1,6 +1,8 @@
 pipeline {
     agent any
-
+    tools {
+        maven 'Maven3'
+    }
     environment {
         AWS_REGION = 'ap-south-1'
         ECR_REPO_BACKEND = 'your-backend-ecr-repo-name'
