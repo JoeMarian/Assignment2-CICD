@@ -6,7 +6,6 @@ app = Flask(__name__)
 def set_mood():
     data = request.json
     mood = data.get('mood', '')
-    # For demo, just return the received mood
     return jsonify({'success': True, 'mood': mood})
 
 @app.route('/status', methods=['GET'])
