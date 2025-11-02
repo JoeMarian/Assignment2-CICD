@@ -11,7 +11,7 @@ pipeline {
 
     stages {
 
-        stage('Checkout Code') {
+        stage('Checkout') {
             steps {
                 git branch: 'main', url: 'https://github.com/JoeMarian/Assignment2-CICD.git'
             }
@@ -20,8 +20,10 @@ pipeline {
         stage('Build & Test Backend') {
             steps {
                 dir('backend') {
-                    sh 'pip3 install -r requirements.txt'
-                    sh 'python3 -m unittest discover tests || true'
+                    sh '''
+                        pip3 install -r requirements.txt
+                        python3 -m unittest discover tests || true
+                    '''
                 }
             }
         }
@@ -29,54 +31,81 @@ pipeline {
         stage('Build Frontend') {
             steps {
                 dir('frontend') {
-                    sh 'npm install'
-                    sh 'npm run build'
+                    sh '''
+                        npm install
+                        npm run build
+                    '''
                 }
             }
         }
 
-        stage('Build & Push Docker Images to AWS ECR') {
+        stage('Build and Push Docker Images') {
             steps {
                 script {
+                    // ensure buildx available and login to ECR from controller
                     sh '''
+                        echo "Logging into ECR from controller..."
                         aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/*}
                         docker buildx create --use || true
-
-                        echo "Building backend..."
-                        cd backend
-                        docker buildx build --platform linux/amd64 -t ${ECR_REPO_BACKEND}:latest --push .
-
-                        echo "Building frontend..."
-                        cd ../frontend
-                        docker buildx build --platform linux/amd64 -t ${ECR_REPO_FRONTEND}:latest --push .
                     '''
+
+                    dir('backend') {
+                        sh """
+                            echo "Building & pushing backend image..."
+                            docker buildx build --platform linux/amd64 -t ${ECR_REPO_BACKEND}:latest --push .
+                        """
+                    }
+
+                    dir('frontend') {
+                        sh """
+                            echo "Building & pushing frontend image..."
+                            docker buildx build --platform linux/amd64 -t ${ECR_REPO_FRONTEND}:latest --push .
+                        """
+                    }
                 }
             }
         }
 
-        stage('Deploy on AWS EC2') {
+        stage('Deploy to EC2 (with cleanup)') {
             steps {
-                withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh-key', keyFileVariable: 'SSH_KEY')]) {
-                    sh '''
-                        ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" ${EC2_USER}@${EC2_HOST} << 'EOF'
-                        echo "Logging into AWS ECR..."
-                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/*}
+                script {
+                    // Compose the remote script here so ${AWS_REGION}, ${ECR_REPO_*} expand on controller
+                    def remoteScript = """
+set -e
+echo "Logging into ECR on EC2..."
+aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND.split('/')[0]}
 
-                        echo "Deploying backend..."
-                        docker pull ${ECR_REPO_BACKEND}:latest || true
-                        docker stop backend || true
-                        docker rm backend || true
-                        docker run -d --name backend -p 5000:5000 ${ECR_REPO_BACKEND}:latest
+echo "Pulling latest images..."
+docker pull ${ECR_REPO_BACKEND}:latest || true
+docker pull ${ECR_REPO_FRONTEND}:latest || true
 
-                        echo "Deploying frontend..."
-                        docker pull ${ECR_REPO_FRONTEND}:latest || true
-                        docker stop frontend || true
-                        docker rm frontend || true
-                        docker run -d --name frontend -p 3000:3000 ${ECR_REPO_FRONTEND}:latest
+echo "Stopping and removing any existing containers..."
+docker stop backend || true
+docker rm backend || true
+docker stop frontend || true
+docker rm frontend || true
 
-                        echo "✅ Deployment completed successfully."
-                        EOF
-                    '''
+echo "Cleaning up unused images, containers, volumes..."
+docker system prune -af --volumes || true
+
+echo "Starting backend container..."
+docker run -d --name backend -p 5000:5000 ${ECR_REPO_BACKEND}:latest
+
+echo "Starting frontend container..."
+docker run -d --name frontend -p 3000:3000 ${ECR_REPO_FRONTEND}:latest
+
+echo "Deployment finished."
+"""
+
+                    // Use withCredentials to get path to temporary key file ($SSH_KEY)
+                    withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh-key', keyFileVariable: 'SSH_KEY')]) {
+                        // Send the prepared remoteScript to EC2 using a single-quoted heredoc so remote executes exact content
+                        sh """
+ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" ${EC2_USER}@${EC2_HOST} <<'EOF'
+${remoteScript}
+EOF
+"""
+                    }
                 }
             }
         }
@@ -86,12 +115,12 @@ pipeline {
         success {
             mail to: 'joemarian3010@gmail.com',
                  subject: "✅ CI/CD SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                 body: "Deployment successful on AWS EC2. Access at: http://${EC2_HOST}:3000"
+                 body: "Deployment completed successfully. Visit: http://${EC2_HOST}:3000"
         }
         failure {
             mail to: 'joemarian3010@gmail.com',
                  subject: "❌ CI/CD FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                 body: "The pipeline failed. Check Jenkins logs for error details."
+                 body: "Pipeline failed. Check Jenkins logs for details: ${env.BUILD_URL}"
         }
     }
 }
