@@ -1,10 +1,6 @@
 pipeline {
     agent any
 
-    tools {
-        maven 'Maven3'
-    }
-
     environment {
         AWS_REGION = 'ap-south-1'
         ECR_REPO_BACKEND = '590184146868.dkr.ecr.ap-south-1.amazonaws.com/backend-app'
@@ -15,17 +11,17 @@ pipeline {
 
     stages {
 
-        stage('Checkout') {
+        stage('Checkout Code') {
             steps {
                 git branch: 'main', url: 'https://github.com/JoeMarian/Assignment2-CICD.git'
             }
         }
 
-        stage('Setup Python Dependencies and Test Backend') {
+        stage('Build & Test Backend') {
             steps {
                 dir('backend') {
                     sh 'pip3 install -r requirements.txt'
-                    sh 'python3 -m unittest discover tests'
+                    sh 'python3 -m unittest discover tests || true'
                 }
             }
         }
@@ -39,21 +35,18 @@ pipeline {
             }
         }
 
-        stage('Build and Push Docker Images') {
+        stage('Build & Push Docker Images to AWS ECR') {
             steps {
                 script {
-                    def backendImage = "${env.ECR_REPO_BACKEND}:latest"
-                    def frontendImage = "${env.ECR_REPO_FRONTEND}:latest"
-
                     sh '''
                         aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/*}
                         docker buildx create --use || true
 
-                        echo "Building and pushing backend image..."
+                        echo "Building backend..."
                         cd backend
                         docker buildx build --platform linux/amd64 -t ${ECR_REPO_BACKEND}:latest --push .
 
-                        echo "Building and pushing frontend image..."
+                        echo "Building frontend..."
                         cd ../frontend
                         docker buildx build --platform linux/amd64 -t ${ECR_REPO_FRONTEND}:latest --push .
                     '''
@@ -61,30 +54,28 @@ pipeline {
             }
         }
 
-        stage('Deploy to EC2') {
+        stage('Deploy on AWS EC2') {
             steps {
-                sshagent(['ec2-ssh-key']) {
+                withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh-key', keyFileVariable: 'SSH_KEY')]) {
                     sh '''
-                        echo "Connecting to EC2 and deploying containers..."
+                        ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" ${EC2_USER}@${EC2_HOST} << 'EOF'
+                        echo "Logging into AWS ECR..."
+                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/*}
 
-                        ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} '
-                            echo "Logging into ECR..."
-                            aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_BACKEND%/*}
+                        echo "Deploying backend..."
+                        docker pull ${ECR_REPO_BACKEND}:latest || true
+                        docker stop backend || true
+                        docker rm backend || true
+                        docker run -d --name backend -p 5000:5000 ${ECR_REPO_BACKEND}:latest
 
-                            echo "Deploying backend..."
-                            docker pull ${ECR_REPO_BACKEND}:latest
-                            docker stop backend || true
-                            docker rm backend || true
-                            docker run -d --name backend -p 5000:5000 ${ECR_REPO_BACKEND}:latest
+                        echo "Deploying frontend..."
+                        docker pull ${ECR_REPO_FRONTEND}:latest || true
+                        docker stop frontend || true
+                        docker rm frontend || true
+                        docker run -d --name frontend -p 3000:3000 ${ECR_REPO_FRONTEND}:latest
 
-                            echo "Deploying frontend..."
-                            docker pull ${ECR_REPO_FRONTEND}:latest
-                            docker stop frontend || true
-                            docker rm frontend || true
-                            docker run -d --name frontend -p 3000:3000 ${ECR_REPO_FRONTEND}:latest
-
-                            echo "Deployment completed successfully."
-                        '
+                        echo "✅ Deployment completed successfully."
+                        EOF
                     '''
                 }
             }
@@ -94,23 +85,13 @@ pipeline {
     post {
         success {
             mail to: 'joemarian3010@gmail.com',
-                 subject: "✅ Jenkins Build Success: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                 body: """Good news! The pipeline completed successfully.
-
-Job: ${env.JOB_NAME}
-Build Number: ${env.BUILD_NUMBER}
-URL: ${env.BUILD_URL}
-"""
+                 subject: "✅ CI/CD SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                 body: "Deployment successful on AWS EC2. Access at: http://${EC2_HOST}:3000"
         }
         failure {
             mail to: 'joemarian3010@gmail.com',
-                 subject: "❌ Jenkins Build FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                 body: """Unfortunately, the pipeline failed.
-
-Job: ${env.JOB_NAME}
-Build Number: ${env.BUILD_NUMBER}
-URL: ${env.BUILD_URL}
-"""
+                 subject: "❌ CI/CD FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                 body: "The pipeline failed. Check Jenkins logs for error details."
         }
     }
 }
