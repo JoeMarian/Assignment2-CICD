@@ -4,7 +4,7 @@ function App() {
   return (
     <div style={styles.container}>
       <header style={styles.header}>
-        <h1 style={styles.title}>Smart Cloud Monitor Test</h1>
+        <h1 style={styles.title}>Smart Cloud Monitor Test2</h1>
         <p style={styles.subtitle}>
           A unified platform to visualize, analyze, and monitor IoT systems effortlessly.
         </p>
