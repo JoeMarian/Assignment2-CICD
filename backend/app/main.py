@@ -6,7 +6,7 @@ app = Flask(__name__)
 def home():
     return """
     <div style='font-family: Arial; text-align: center; margin-top: 100px;'>
-        <h2>🚀 Backend Successfully Deployed on EC2! test 2</h2>
+        <h2>🚀 Backend Successfully Deployed on EC2! test 3</h2>
         <p>This Flask API is running inside a Docker container managed via Jenkins CI/CD.</p>
         <p>Check <a href='/status'>/status</a> for API health.</p>
     </div>
